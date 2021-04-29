@@ -19,28 +19,34 @@ package tag
 import (
 	"testing"
 
-	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/schema/latest"
+	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/graph"
+	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/runner/runcontext"
+	latest_v1 "github.com/GoogleContainerTools/skaffold/pkg/skaffold/schema/latest/v1"
 	"github.com/GoogleContainerTools/skaffold/testutil"
 )
 
 func TestCreateComponents(t *testing.T) {
+	runCtx := &runcontext.RunContext{}
+
+	digestExample, _ := NewInputDigestTagger(runCtx, graph.ToArtifactGraph(runCtx.Artifacts()))
 	gitExample, _ := NewGitCommit("", "", false)
 	envExample, _ := NewEnvTemplateTagger("test")
 
 	tests := []struct {
 		description          string
-		customTemplateTagger *latest.CustomTemplateTagger
+		customTemplateTagger *latest_v1.CustomTemplateTagger
 		expected             map[string]Tagger
 		shouldErr            bool
 	}{
 		{
 			description: "correct component types",
-			customTemplateTagger: &latest.CustomTemplateTagger{
-				Components: []latest.TaggerComponent{
-					{Name: "FOO", Component: latest.TagPolicy{GitTagger: &latest.GitTagger{}}},
-					{Name: "FOE", Component: latest.TagPolicy{ShaTagger: &latest.ShaTagger{}}},
-					{Name: "BAR", Component: latest.TagPolicy{EnvTemplateTagger: &latest.EnvTemplateTagger{Template: "test"}}},
-					{Name: "BAT", Component: latest.TagPolicy{DateTimeTagger: &latest.DateTimeTagger{}}},
+			customTemplateTagger: &latest_v1.CustomTemplateTagger{
+				Components: []latest_v1.TaggerComponent{
+					{Name: "FOO", Component: latest_v1.TagPolicy{GitTagger: &latest_v1.GitTagger{}}},
+					{Name: "FOE", Component: latest_v1.TagPolicy{ShaTagger: &latest_v1.ShaTagger{}}},
+					{Name: "BAR", Component: latest_v1.TagPolicy{EnvTemplateTagger: &latest_v1.EnvTemplateTagger{Template: "test"}}},
+					{Name: "BAT", Component: latest_v1.TagPolicy{DateTimeTagger: &latest_v1.DateTimeTagger{}}},
+					{Name: "BAS", Component: latest_v1.TagPolicy{InputDigest: &latest_v1.InputDigest{}}},
 				},
 			},
 			expected: map[string]Tagger{
@@ -48,32 +54,33 @@ func TestCreateComponents(t *testing.T) {
 				"FOE": &ChecksumTagger{},
 				"BAR": envExample,
 				"BAT": NewDateTimeTagger("", ""),
+				"BAS": digestExample,
 			},
 		},
 		{
 			description: "customTemplate is an invalid component",
-			customTemplateTagger: &latest.CustomTemplateTagger{
-				Components: []latest.TaggerComponent{
-					{Name: "FOO", Component: latest.TagPolicy{CustomTemplateTagger: &latest.CustomTemplateTagger{Template: "test"}}},
+			customTemplateTagger: &latest_v1.CustomTemplateTagger{
+				Components: []latest_v1.TaggerComponent{
+					{Name: "FOO", Component: latest_v1.TagPolicy{CustomTemplateTagger: &latest_v1.CustomTemplateTagger{Template: "test"}}},
 				},
 			},
 			shouldErr: true,
 		},
 		{
 			description: "recurring names",
-			customTemplateTagger: &latest.CustomTemplateTagger{
-				Components: []latest.TaggerComponent{
-					{Name: "FOO", Component: latest.TagPolicy{GitTagger: &latest.GitTagger{}}},
-					{Name: "FOO", Component: latest.TagPolicy{GitTagger: &latest.GitTagger{}}},
+			customTemplateTagger: &latest_v1.CustomTemplateTagger{
+				Components: []latest_v1.TaggerComponent{
+					{Name: "FOO", Component: latest_v1.TagPolicy{GitTagger: &latest_v1.GitTagger{}}},
+					{Name: "FOO", Component: latest_v1.TagPolicy{GitTagger: &latest_v1.GitTagger{}}},
 				},
 			},
 			shouldErr: true,
 		},
 		{
 			description: "unknown component",
-			customTemplateTagger: &latest.CustomTemplateTagger{
-				Components: []latest.TaggerComponent{
-					{Name: "FOO", Component: latest.TagPolicy{}},
+			customTemplateTagger: &latest_v1.CustomTemplateTagger{
+				Components: []latest_v1.TaggerComponent{
+					{Name: "FOO", Component: latest_v1.TagPolicy{}},
 				},
 			},
 			shouldErr: true,
@@ -81,7 +88,7 @@ func TestCreateComponents(t *testing.T) {
 	}
 	for _, test := range tests {
 		testutil.Run(t, test.description, func(t *testutil.T) {
-			components, err := CreateComponents(test.customTemplateTagger)
+			components, err := CreateComponents(runCtx, test.customTemplateTagger)
 			t.CheckErrorAndDeepEqual(test.shouldErr, err, len(test.expected), len(components))
 			for k, v := range test.expected {
 				t.CheckTypeEquality(v, components[k])

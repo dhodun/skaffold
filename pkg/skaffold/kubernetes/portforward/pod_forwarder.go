@@ -28,7 +28,7 @@ import (
 	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/color"
 	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/constants"
 	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/kubernetes"
-	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/schema/latest"
+	latest_v1 "github.com/GoogleContainerTools/skaffold/pkg/skaffold/schema/latest/v1"
 	schemautil "github.com/GoogleContainerTools/skaffold/pkg/skaffold/schema/util"
 )
 
@@ -44,14 +44,21 @@ type WatchingPodForwarder struct {
 	entryManager *EntryManager
 	podWatcher   kubernetes.PodWatcher
 	events       chan kubernetes.PodEvent
+
+	// portSelector returns a possibly-filtered and possibly-generated set of ports for a pod.
+	containerPorts portSelector
 }
 
+// portSelector selects a set of ContainerPorts from a container in a pod.
+type portSelector func(*v1.Pod, v1.Container) []v1.ContainerPort
+
 // NewWatchingPodForwarder returns a struct that tracks and port-forwards pods as they are created and modified
-func NewWatchingPodForwarder(entryManager *EntryManager, podSelector kubernetes.PodSelector) *WatchingPodForwarder {
+func NewWatchingPodForwarder(entryManager *EntryManager, podSelector kubernetes.PodSelector, containerPorts portSelector) *WatchingPodForwarder {
 	return &WatchingPodForwarder{
-		entryManager: entryManager,
-		podWatcher:   newPodWatcher(podSelector),
-		events:       make(chan kubernetes.PodEvent),
+		entryManager:   entryManager,
+		podWatcher:     newPodWatcher(podSelector),
+		events:         make(chan kubernetes.PodEvent),
+		containerPorts: containerPorts,
 	}
 }
 
@@ -96,15 +103,14 @@ func (p *WatchingPodForwarder) Stop() {
 func (p *WatchingPodForwarder) portForwardPod(ctx context.Context, pod *v1.Pod) error {
 	ownerReference := topLevelOwnerKey(ctx, pod, pod.Kind)
 	for _, c := range pod.Spec.Containers {
-		for _, port := range c.Ports {
+		for _, port := range p.containerPorts(pod, c) {
 			// get current entry for this container
-			resource := latest.PortForwardResource{
+			resource := latest_v1.PortForwardResource{
 				Type:      constants.Pod,
 				Name:      pod.Name,
 				Namespace: pod.Namespace,
 				Port:      schemautil.FromInt(int(port.ContainerPort)),
 				Address:   constants.DefaultPortForwardAddress,
-				LocalPort: int(port.ContainerPort),
 			}
 
 			entry, err := p.podForwardingEntry(pod.ResourceVersion, c.Name, port.Name, ownerReference, resource)
@@ -126,7 +132,7 @@ func (p *WatchingPodForwarder) portForwardPod(ctx context.Context, pod *v1.Pod) 
 	return nil
 }
 
-func (p *WatchingPodForwarder) podForwardingEntry(resourceVersion, containerName, portName, ownerReference string, resource latest.PortForwardResource) (*portForwardEntry, error) {
+func (p *WatchingPodForwarder) podForwardingEntry(resourceVersion, containerName, portName, ownerReference string, resource latest_v1.PortForwardResource) (*portForwardEntry, error) {
 	rv, err := strconv.Atoi(resourceVersion)
 	if err != nil {
 		return nil, fmt.Errorf("converting resource version to integer: %w", err)

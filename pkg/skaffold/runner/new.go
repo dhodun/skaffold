@@ -34,11 +34,13 @@ import (
 	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/deploy/label"
 	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/deploy/status"
 	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/event"
+	eventV2 "github.com/GoogleContainerTools/skaffold/pkg/skaffold/event/v2"
 	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/filemon"
+	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/graph"
 	pkgkubectl "github.com/GoogleContainerTools/skaffold/pkg/skaffold/kubectl"
 	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/kubernetes"
 	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/runner/runcontext"
-	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/schema/latest"
+	latest_v1 "github.com/GoogleContainerTools/skaffold/pkg/skaffold/schema/latest/v1"
 	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/server"
 	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/sync"
 	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/tag"
@@ -51,6 +53,7 @@ import (
 func NewForConfig(runCtx *runcontext.RunContext) (*SkaffoldRunner, error) {
 	event.InitializeState(runCtx)
 	event.LogMetaEvent()
+	eventV2.InitializeState(runCtx)
 	kubectlCLI := pkgkubectl.NewCLI(runCtx, "")
 
 	tagger, err := tag.NewTaggerMux(runCtx)
@@ -59,11 +62,11 @@ func NewForConfig(runCtx *runcontext.RunContext) (*SkaffoldRunner, error) {
 	}
 
 	store := build.NewArtifactStore()
-	graph := build.ToArtifactGraph(runCtx.Artifacts())
-	sourceDependencies := build.NewTransitiveSourceDependenciesCache(runCtx, store, graph)
+	g := graph.ToArtifactGraph(runCtx.Artifacts())
+	sourceDependencies := graph.NewTransitiveSourceDependenciesCache(runCtx, store, g)
 
 	var builder build.Builder
-	builder, err = build.NewBuilderMux(runCtx, store, func(p latest.Pipeline) (build.PipelineBuilder, error) {
+	builder, err = build.NewBuilderMux(runCtx, store, func(p latest_v1.Pipeline) (build.PipelineBuilder, error) {
 		return getBuilder(runCtx, store, sourceDependencies, p)
 	})
 	if err != nil {
@@ -84,13 +87,13 @@ func NewForConfig(runCtx *runcontext.RunContext) (*SkaffoldRunner, error) {
 		return nil, fmt.Errorf("creating deployer: %w", err)
 	}
 
-	depLister := func(ctx context.Context, artifact *latest.Artifact) ([]string, error) {
+	depLister := func(ctx context.Context, artifact *latest_v1.Artifact) ([]string, error) {
 		buildDependencies, err := sourceDependencies.ResolveForArtifact(ctx, artifact)
 		if err != nil {
 			return nil, err
 		}
 
-		testDependencies, err := tester.TestDependencies()
+		testDependencies, err := tester.TestDependencies(artifact)
 		if err != nil {
 			return nil, err
 		}
@@ -98,7 +101,7 @@ func NewForConfig(runCtx *runcontext.RunContext) (*SkaffoldRunner, error) {
 		return append(buildDependencies, testDependencies...), nil
 	}
 
-	artifactCache, err := cache.NewCache(runCtx, isLocalImage, depLister, graph, store)
+	artifactCache, err := cache.NewCache(runCtx, isLocalImage, depLister, g, store)
 	if err != nil {
 		return nil, fmt.Errorf("initializing cache: %w", err)
 	}
@@ -115,11 +118,22 @@ func NewForConfig(runCtx *runcontext.RunContext) (*SkaffoldRunner, error) {
 		return nil, fmt.Errorf("creating watch trigger: %w", err)
 	}
 
+	podSelectors := kubernetes.NewImageList()
 	return &SkaffoldRunner{
-		builder:  builder,
-		tester:   tester,
+		Builder: Builder{
+			builder:     builder,
+			tagger:      tagger,
+			cache:       artifactCache,
+			podSelector: podSelectors,
+			runCtx:      runCtx,
+		},
+		Pruner: Pruner{
+			builder,
+		},
+		Tester: Tester{
+			tester: tester,
+		},
 		deployer: deployer,
-		tagger:   tagger,
 		syncer:   syncer,
 		monitor:  monitor,
 		listener: &SkaffoldListener{
@@ -132,7 +146,7 @@ func NewForConfig(runCtx *runcontext.RunContext) (*SkaffoldRunner, error) {
 		sourceDependencies: sourceDependencies,
 		kubectlCLI:         kubectlCLI,
 		labeller:           labeller,
-		podSelector:        kubernetes.NewImageList(),
+		podSelector:        podSelectors,
 		cache:              artifactCache,
 		runCtx:             runCtx,
 		intents:            intents,
@@ -140,7 +154,7 @@ func NewForConfig(runCtx *runcontext.RunContext) (*SkaffoldRunner, error) {
 	}, nil
 }
 
-func setupIntents(runCtx *runcontext.RunContext) (*intents, chan bool) {
+func setupIntents(runCtx *runcontext.RunContext) (*Intents, chan bool) {
 	intents := newIntents(runCtx.AutoBuild(), runCtx.AutoSync(), runCtx.AutoDeploy())
 
 	intentChan := make(chan bool, 1)
@@ -185,10 +199,15 @@ func isImageLocal(runCtx *runcontext.RunContext, imageName string) (bool, error)
 
 	cl := runCtx.GetCluster()
 	var pushImages bool
-	if pipeline.Build.LocalBuild.Push == nil {
+
+	switch {
+	case runCtx.Opts.PushImages.Value() != nil:
+		logrus.Debugf("push value set via skaffold build --push flag, --push=%t", *runCtx.Opts.PushImages.Value())
+		pushImages = *runCtx.Opts.PushImages.Value()
+	case pipeline.Build.LocalBuild.Push == nil:
 		pushImages = cl.PushImages
 		logrus.Debugf("push value not present, defaulting to %t because cluster.PushImages is %t", pushImages, cl.PushImages)
-	} else {
+	default:
 		pushImages = *pipeline.Build.LocalBuild.Push
 	}
 	return !pushImages, nil
@@ -223,7 +242,7 @@ Therefore, in this function we do implicit validation of the provided configurat
 func getDefaultDeployer(runCtx *runcontext.RunContext, labels map[string]string) (deploy.Deployer, error) {
 	deployCfgs := runCtx.DeployConfigs()
 
-	var kFlags *latest.KubectlFlags
+	var kFlags *latest_v1.KubectlFlags
 	var logPrefix string
 	var defaultNamespace *string
 	var kubeContext string
@@ -249,7 +268,7 @@ func getDefaultDeployer(runCtx *runcontext.RunContext, labels map[string]string)
 			logPrefix = d.Logs.Prefix
 		}
 		var currentDefaultNamespace *string
-		var currentKubectlFlags latest.KubectlFlags
+		var currentKubectlFlags latest_v1.KubectlFlags
 		if d.KubectlDeploy != nil {
 			currentDefaultNamespace = d.KubectlDeploy.DefaultNamespace
 			currentKubectlFlags = d.KubectlDeploy.Flags
@@ -272,9 +291,9 @@ func getDefaultDeployer(runCtx *runcontext.RunContext, labels map[string]string)
 		}
 	}
 	if kFlags == nil {
-		kFlags = &latest.KubectlFlags{}
+		kFlags = &latest_v1.KubectlFlags{}
 	}
-	k := &latest.KubectlDeploy{
+	k := &latest_v1.KubectlDeploy{
 		Flags:            *kFlags,
 		DefaultNamespace: defaultNamespace,
 	}
@@ -285,7 +304,7 @@ func getDefaultDeployer(runCtx *runcontext.RunContext, labels map[string]string)
 	return defaultDeployer, nil
 }
 
-func validateKubectlFlags(flags *latest.KubectlFlags, additional latest.KubectlFlags) error {
+func validateKubectlFlags(flags *latest_v1.KubectlFlags, additional latest_v1.KubectlFlags) error {
 	errStr := "conflicting sets of kubectl deploy flags not supported in `skaffold apply` (flag: %s)"
 	if additional.DisableValidation != flags.DisableValidation {
 		return fmt.Errorf(errStr, strconv.FormatBool(additional.DisableValidation))

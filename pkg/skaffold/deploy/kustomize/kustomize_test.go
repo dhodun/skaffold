@@ -25,11 +25,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/build"
 	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/config"
 	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/deploy/kubectl"
+	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/graph"
 	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/runner/runcontext"
-	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/schema/latest"
+	latest_v1 "github.com/GoogleContainerTools/skaffold/pkg/skaffold/schema/latest/v1"
 	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/util"
 	"github.com/GoogleContainerTools/skaffold/testutil"
 )
@@ -37,8 +37,8 @@ import (
 func TestKustomizeDeploy(t *testing.T) {
 	tests := []struct {
 		description                 string
-		kustomize                   latest.KustomizeDeploy
-		builds                      []build.Artifact
+		kustomize                   latest_v1.KustomizeDeploy
+		builds                      []graph.Artifact
 		commands                    util.Command
 		shouldErr                   bool
 		forceDeploy                 bool
@@ -48,7 +48,7 @@ func TestKustomizeDeploy(t *testing.T) {
 	}{
 		{
 			description: "no manifest",
-			kustomize: latest.KustomizeDeploy{
+			kustomize: latest_v1.KustomizeDeploy{
 				KustomizePaths: []string{"."},
 			},
 			commands: testutil.
@@ -58,7 +58,7 @@ func TestKustomizeDeploy(t *testing.T) {
 		},
 		{
 			description: "deploy success",
-			kustomize: latest.KustomizeDeploy{
+			kustomize: latest_v1.KustomizeDeploy{
 				KustomizePaths: []string{"."},
 			},
 			commands: testutil.
@@ -66,7 +66,7 @@ func TestKustomizeDeploy(t *testing.T) {
 				AndRunOut("kustomize build .", kubectl.DeploymentWebYAML).
 				AndRunInputOut("kubectl --context kubecontext --namespace testNamespace get -f - --ignore-not-found -ojson", kubectl.DeploymentWebYAMLv1, "").
 				AndRun("kubectl --context kubecontext --namespace testNamespace apply -f - --force --grace-period=0"),
-			builds: []build.Artifact{{
+			builds: []graph.Artifact{{
 				ImageName: "leeroy-web",
 				Tag:       "leeroy-web:v1",
 			}},
@@ -75,7 +75,7 @@ func TestKustomizeDeploy(t *testing.T) {
 		},
 		{
 			description: "deploy success (default namespace)",
-			kustomize: latest.KustomizeDeploy{
+			kustomize: latest_v1.KustomizeDeploy{
 				KustomizePaths:   []string{"."},
 				DefaultNamespace: &kubectl.TestNamespace2,
 			},
@@ -84,7 +84,7 @@ func TestKustomizeDeploy(t *testing.T) {
 				AndRunOut("kustomize build .", kubectl.DeploymentWebYAML).
 				AndRunInputOut("kubectl --context kubecontext --namespace testNamespace2 get -f - --ignore-not-found -ojson", kubectl.DeploymentWebYAMLv1, "").
 				AndRun("kubectl --context kubecontext --namespace testNamespace2 apply -f - --force --grace-period=0"),
-			builds: []build.Artifact{{
+			builds: []graph.Artifact{{
 				ImageName: "leeroy-web",
 				Tag:       "leeroy-web:v1",
 			}},
@@ -94,7 +94,7 @@ func TestKustomizeDeploy(t *testing.T) {
 		},
 		{
 			description: "deploy success (default namespace with env template)",
-			kustomize: latest.KustomizeDeploy{
+			kustomize: latest_v1.KustomizeDeploy{
 				KustomizePaths:   []string{"."},
 				DefaultNamespace: &kubectl.TestNamespace2FromEnvTemplate,
 			},
@@ -103,7 +103,7 @@ func TestKustomizeDeploy(t *testing.T) {
 				AndRunOut("kustomize build .", kubectl.DeploymentWebYAML).
 				AndRunInputOut("kubectl --context kubecontext --namespace testNamespace2 get -f - --ignore-not-found -ojson", kubectl.DeploymentWebYAMLv1, "").
 				AndRun("kubectl --context kubecontext --namespace testNamespace2 apply -f - --force --grace-period=0"),
-			builds: []build.Artifact{{
+			builds: []graph.Artifact{{
 				ImageName: "leeroy-web",
 				Tag:       "leeroy-web:v1",
 			}},
@@ -116,7 +116,7 @@ func TestKustomizeDeploy(t *testing.T) {
 		},
 		{
 			description: "deploy success with multiple kustomizations",
-			kustomize: latest.KustomizeDeploy{
+			kustomize: latest_v1.KustomizeDeploy{
 				KustomizePaths: []string{"a", "b"},
 			},
 			commands: testutil.
@@ -125,7 +125,7 @@ func TestKustomizeDeploy(t *testing.T) {
 				AndRunOut("kustomize build b", kubectl.DeploymentAppYAML).
 				AndRunInputOut("kubectl --context kubecontext --namespace testNamespace get -f - --ignore-not-found -ojson", kubectl.DeploymentWebYAMLv1+"\n---\n"+kubectl.DeploymentAppYAMLv1, "").
 				AndRun("kubectl --context kubecontext --namespace testNamespace apply -f - --force --grace-period=0"),
-			builds: []build.Artifact{
+			builds: []graph.Artifact{
 				{
 					ImageName: "leeroy-web",
 					Tag:       "leeroy-web:v1",
@@ -140,7 +140,7 @@ func TestKustomizeDeploy(t *testing.T) {
 		},
 		{
 			description: "built-in kubectl kustomize",
-			kustomize: latest.KustomizeDeploy{
+			kustomize: latest_v1.KustomizeDeploy{
 				KustomizePaths: []string{"a", "b"},
 			},
 			commands: testutil.
@@ -149,7 +149,7 @@ func TestKustomizeDeploy(t *testing.T) {
 				AndRunOut("kubectl --context kubecontext --namespace testNamespace kustomize b", kubectl.DeploymentAppYAML).
 				AndRunInputOut("kubectl --context kubecontext --namespace testNamespace get -f - --ignore-not-found -ojson", kubectl.DeploymentWebYAMLv1+"\n---\n"+kubectl.DeploymentAppYAMLv1, "").
 				AndRun("kubectl --context kubecontext --namespace testNamespace apply -f - --force --grace-period=0"),
-			builds: []build.Artifact{
+			builds: []graph.Artifact{
 				{
 					ImageName: "leeroy-web",
 					Tag:       "leeroy-web:v1",
@@ -200,13 +200,13 @@ func TestKustomizeCleanup(t *testing.T) {
 
 	tests := []struct {
 		description string
-		kustomize   latest.KustomizeDeploy
+		kustomize   latest_v1.KustomizeDeploy
 		commands    util.Command
 		shouldErr   bool
 	}{
 		{
 			description: "cleanup success",
-			kustomize: latest.KustomizeDeploy{
+			kustomize: latest_v1.KustomizeDeploy{
 				KustomizePaths: []string{tmpDir.Root()},
 			},
 			commands: testutil.
@@ -215,7 +215,7 @@ func TestKustomizeCleanup(t *testing.T) {
 		},
 		{
 			description: "cleanup success with multiple kustomizations",
-			kustomize: latest.KustomizeDeploy{
+			kustomize: latest_v1.KustomizeDeploy{
 				KustomizePaths: tmpDir.Paths("a", "b"),
 			},
 			commands: testutil.
@@ -225,7 +225,7 @@ func TestKustomizeCleanup(t *testing.T) {
 		},
 		{
 			description: "cleanup error",
-			kustomize: latest.KustomizeDeploy{
+			kustomize: latest_v1.KustomizeDeploy{
 				KustomizePaths: []string{tmpDir.Root()},
 			},
 			commands: testutil.
@@ -235,7 +235,7 @@ func TestKustomizeCleanup(t *testing.T) {
 		},
 		{
 			description: "fail to read manifests",
-			kustomize: latest.KustomizeDeploy{
+			kustomize: latest_v1.KustomizeDeploy{
 				KustomizePaths: []string{tmpDir.Root()},
 			},
 			commands: testutil.
@@ -454,7 +454,7 @@ func TestDependenciesForKustomization(t *testing.T) {
 				tmpDir.Write(path, contents)
 			}
 
-			k, err := NewDeployer(&kustomizeConfig{}, nil, &latest.KustomizeDeploy{KustomizePaths: kustomizePaths})
+			k, err := NewDeployer(&kustomizeConfig{}, nil, &latest_v1.KustomizeDeploy{KustomizePaths: kustomizePaths})
 			t.RequireNoError(err)
 
 			deps, err := k.Dependencies()
@@ -536,7 +536,7 @@ func TestKustomizeRender(t *testing.T) {
 	}
 	tests := []struct {
 		description    string
-		builds         []build.Artifact
+		builds         []graph.Artifact
 		labels         map[string]string
 		kustomizations []kustomizationCall
 		expected       string
@@ -544,7 +544,7 @@ func TestKustomizeRender(t *testing.T) {
 	}{
 		{
 			description: "single kustomization",
-			builds: []build.Artifact{
+			builds: []graph.Artifact{
 				{
 					ImageName: "gcr.io/project/image1",
 					Tag:       "gcr.io/project/image1:tag1",
@@ -584,7 +584,7 @@ spec:
 		},
 		{
 			description: "single kustomization with user labels",
-			builds: []build.Artifact{
+			builds: []graph.Artifact{
 				{
 					ImageName: "gcr.io/project/image1",
 					Tag:       "gcr.io/project/image1:tag1",
@@ -627,7 +627,7 @@ spec:
 		},
 		{
 			description: "multiple kustomizations",
-			builds: []build.Artifact{
+			builds: []graph.Artifact{
 				{
 					ImageName: "gcr.io/project/image1",
 					Tag:       "gcr.io/project/image1:tag1",
@@ -698,7 +698,7 @@ spec:
 			k, err := NewDeployer(&kustomizeConfig{
 				workingDir: ".",
 				RunContext: runcontext.RunContext{Opts: config.SkaffoldOptions{Namespace: kubectl.TestNamespace}},
-			}, test.labels, &latest.KustomizeDeploy{
+			}, test.labels, &latest_v1.KustomizeDeploy{
 				KustomizePaths: kustomizationPaths,
 			})
 			t.RequireNoError(err)

@@ -25,27 +25,28 @@ import (
 	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/build/cluster"
 	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/build/gcb"
 	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/build/local"
+	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/graph"
 	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/runner/runcontext"
-	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/schema/latest"
+	latest_v1 "github.com/GoogleContainerTools/skaffold/pkg/skaffold/schema/latest/v1"
 )
 
 // builderCtx encapsulates a given skaffold run context along with additional builder constructs.
 type builderCtx struct {
 	*runcontext.RunContext
 	artifactStore           build.ArtifactStore
-	sourceDependenciesCache build.TransitiveSourceDependenciesCache
+	sourceDependenciesCache graph.TransitiveSourceDependenciesCache
 }
 
 func (b *builderCtx) ArtifactStore() build.ArtifactStore {
 	return b.artifactStore
 }
 
-func (b *builderCtx) SourceDependenciesResolver() build.TransitiveSourceDependenciesCache {
+func (b *builderCtx) SourceDependenciesResolver() graph.TransitiveSourceDependenciesCache {
 	return b.sourceDependenciesCache
 }
 
 // getBuilder creates a builder from a given RunContext and build pipeline type.
-func getBuilder(r *runcontext.RunContext, s build.ArtifactStore, d build.TransitiveSourceDependenciesCache, p latest.Pipeline) (build.PipelineBuilder, error) {
+func getBuilder(r *runcontext.RunContext, s build.ArtifactStore, d graph.TransitiveSourceDependenciesCache, p latest_v1.Pipeline) (build.PipelineBuilder, error) {
 	bCtx := &builderCtx{artifactStore: s, sourceDependenciesCache: d, RunContext: r}
 	switch {
 	case p.Build.LocalBuild != nil:

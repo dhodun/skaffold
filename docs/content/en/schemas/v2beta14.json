@@ -973,8 +973,8 @@
             "type": "string"
           },
           "type": "array",
-          "description": "should be set to the file dependencies for this command, so that the skaffold file watcher knows when to retest and perform file synchronization.",
-          "x-intellij-html-description": "should be set to the file dependencies for this command, so that the skaffold file watcher knows when to retest and perform file synchronization.",
+          "description": "locates the file dependencies for the command relative to workspace. Paths should be set to the file dependencies for this command, so that the skaffold file watcher knows when to retest and perform file synchronization.",
+          "x-intellij-html-description": "locates the file dependencies for the command relative to workspace. Paths should be set to the file dependencies for this command, so that the skaffold file watcher knows when to retest and perform file synchronization.",
           "default": "[]",
           "examples": [
             "[\"src/test/**\"]"
@@ -1701,6 +1701,10 @@
       "additionalProperties": false,
       "description": "describes a helm release to be deployed.",
       "x-intellij-html-description": "describes a helm release to be deployed."
+    },
+    "InputDigest": {
+      "description": "*beta* tags hashes the image content.",
+      "x-intellij-html-description": "<em>beta</em> tags hashes the image content."
     },
     "JSONPatch": {
       "required": [
@@ -2840,6 +2844,11 @@
           "description": "*beta* tags images with the git tag or commit of the artifact's workspace.",
           "x-intellij-html-description": "<em>beta</em> tags images with the git tag or commit of the artifact's workspace."
         },
+        "inputDigest": {
+          "$ref": "#/definitions/InputDigest",
+          "description": "*beta* tags images with their sha256 digest of their content.",
+          "x-intellij-html-description": "<em>beta</em> tags images with their sha256 digest of their content."
+        },
         "sha256": {
           "$ref": "#/definitions/ShaTagger",
           "description": "*beta* tags images with their sha256 digest.",
@@ -2851,7 +2860,8 @@
         "sha256",
         "envTemplate",
         "dateTime",
-        "customTemplate"
+        "customTemplate",
+        "inputDigest"
       ],
       "additionalProperties": false,
       "description": "contains all the configuration for the tagging step.",
@@ -2966,6 +2976,25 @@
             "customTemplate"
           ],
           "additionalProperties": false
+        },
+        {
+          "properties": {
+            "inputDigest": {
+              "$ref": "#/definitions/InputDigest",
+              "description": "*beta* tags images with their sha256 digest of their content.",
+              "x-intellij-html-description": "<em>beta</em> tags images with their sha256 digest of their content."
+            },
+            "name": {
+              "type": "string",
+              "description": "an identifier for the component.",
+              "x-intellij-html-description": "an identifier for the component."
+            }
+          },
+          "preferredOrder": [
+            "name",
+            "inputDigest"
+          ],
+          "additionalProperties": false
         }
       ],
       "description": "*beta* a component of CustomTemplateTagger.",
@@ -2976,6 +3005,12 @@
         "image"
       ],
       "properties": {
+        "context": {
+          "type": "string",
+          "description": "directory containing the test sources.",
+          "x-intellij-html-description": "directory containing the test sources.",
+          "default": "."
+        },
         "custom": {
           "items": {
             "$ref": "#/definitions/CustomTest"
@@ -3007,6 +3042,7 @@
       },
       "preferredOrder": [
         "image",
+        "context",
         "custom",
         "structureTests"
       ],

@@ -20,32 +20,33 @@ import (
 	"testing"
 
 	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/build"
+	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/graph"
 	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/runner/runcontext"
-	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/schema/latest"
+	latest_v1 "github.com/GoogleContainerTools/skaffold/pkg/skaffold/schema/latest/v1"
 	"github.com/GoogleContainerTools/skaffold/testutil"
 )
 
 func TestBuildSpecFail(t *testing.T) {
 	tests := []struct {
 		description string
-		artifact    *latest.Artifact
+		artifact    *latest_v1.Artifact
 	}{
 		{
 			description: "bazel",
-			artifact: &latest.Artifact{
-				ArtifactType: latest.ArtifactType{
-					BazelArtifact: &latest.BazelArtifact{},
+			artifact: &latest_v1.Artifact{
+				ArtifactType: latest_v1.ArtifactType{
+					BazelArtifact: &latest_v1.BazelArtifact{},
 				},
 			},
 		},
 		{
 			description: "unknown",
-			artifact:    &latest.Artifact{},
+			artifact:    &latest_v1.Artifact{},
 		},
 	}
 	for _, test := range tests {
 		testutil.Run(t, test.description, func(t *testutil.T) {
-			builder := NewBuilder(&mockBuilderContext{}, &latest.GoogleCloudBuild{})
+			builder := NewBuilder(&mockBuilderContext{}, &latest_v1.GoogleCloudBuild{})
 
 			_, err := builder.buildSpec(test.artifact, "tag", "bucket", "object")
 
@@ -57,10 +58,10 @@ func TestBuildSpecFail(t *testing.T) {
 type mockBuilderContext struct {
 	runcontext.RunContext // Embedded to provide the default values.
 	artifactStore         build.ArtifactStore
-	sourceDepsResolver    func() build.TransitiveSourceDependenciesCache
+	sourceDepsResolver    func() graph.TransitiveSourceDependenciesCache
 }
 
-func (c *mockBuilderContext) SourceDependenciesResolver() build.TransitiveSourceDependenciesCache {
+func (c *mockBuilderContext) SourceDependenciesResolver() graph.TransitiveSourceDependenciesCache {
 	if c.sourceDepsResolver != nil {
 		return c.sourceDepsResolver()
 	}

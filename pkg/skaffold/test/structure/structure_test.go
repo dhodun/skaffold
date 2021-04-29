@@ -22,11 +22,13 @@ import (
 	"io/ioutil"
 	"testing"
 
-	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/build"
+	"github.com/blang/semver"
+
+	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/cluster"
 	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/config"
 	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/docker"
 	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/runner/runcontext"
-	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/schema/latest"
+	latest_v1 "github.com/GoogleContainerTools/skaffold/pkg/skaffold/schema/latest/v1"
 	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/util"
 	"github.com/GoogleContainerTools/skaffold/testutil"
 	testEvent "github.com/GoogleContainerTools/skaffold/testutil/event"
@@ -39,28 +41,28 @@ func TestNewRunner(t *testing.T) {
 
 	testutil.Run(t, "", func(t *testutil.T) {
 		tmpDir := t.NewTempDir().Touch("test.yaml")
+		t.Override(&cluster.FindMinikubeBinary, func() (string, semver.Version, error) { return "", semver.Version{}, errors.New("not found") })
+
 		t.Override(&util.DefaultExecCommand, testutil.CmdRun("container-structure-test test -v warn --image "+imageName+" --config "+tmpDir.Path("test.yaml")))
 
 		cfg := &mockConfig{
-			workingDir: tmpDir.Root(),
-			tests: []*latest.TestCase{{
+			tests: []*latest_v1.TestCase{{
 				ImageName:      "image",
+				Workspace:      tmpDir.Root(),
 				StructureTests: []string{"test.yaml"},
 			}},
 		}
 
-		testCase := &latest.TestCase{
+		testCase := &latest_v1.TestCase{
 			ImageName:      "image",
+			Workspace:      tmpDir.Root(),
 			StructureTests: []string{"test.yaml"},
 		}
-		testEvent.InitializeState([]latest.Pipeline{{}})
+		testEvent.InitializeState([]latest_v1.Pipeline{{}})
 
-		testRunner, err := New(cfg, cfg.workingDir, testCase, func(imageName string) (bool, error) { return true, nil })
+		testRunner, err := New(cfg, testCase, true)
 		t.CheckNoError(err)
-		err = testRunner.Test(context.Background(), ioutil.Discard, []build.Artifact{{
-			ImageName: "image",
-			Tag:       "image:tag",
-		}})
+		err = testRunner.Test(context.Background(), ioutil.Discard, "image:tag")
 		t.CheckNoError(err)
 	})
 }
@@ -73,19 +75,20 @@ func TestIgnoreDockerNotFound(t *testing.T) {
 		})
 
 		cfg := &mockConfig{
-			workingDir: tmpDir.Root(),
-			tests: []*latest.TestCase{{
+			tests: []*latest_v1.TestCase{{
 				ImageName:      "image",
+				Workspace:      tmpDir.Root(),
 				StructureTests: []string{"test.yaml"},
 			}},
 		}
 
-		testCase := &latest.TestCase{
+		testCase := &latest_v1.TestCase{
 			ImageName:      "image",
+			Workspace:      tmpDir.Root(),
 			StructureTests: []string{"test.yaml"},
 		}
 
-		testRunner, err := New(cfg, cfg.workingDir, testCase, func(imageName string) (bool, error) { return true, nil })
+		testRunner, err := New(cfg, testCase, true)
 		t.CheckError(true, err)
 		t.CheckNil(testRunner)
 	})
@@ -93,11 +96,10 @@ func TestIgnoreDockerNotFound(t *testing.T) {
 
 type mockConfig struct {
 	runcontext.RunContext // Embedded to provide the default values.
-	workingDir            string
-	tests                 []*latest.TestCase
+	tests                 []*latest_v1.TestCase
 	muted                 config.Muted
 }
 
-func (c *mockConfig) Muted() config.Muted           { return c.muted }
-func (c *mockConfig) GetWorkingDir() string         { return c.workingDir }
-func (c *mockConfig) TestCases() []*latest.TestCase { return c.tests }
+func (c *mockConfig) Muted() config.Muted { return c.muted }
+
+func (c *mockConfig) TestCases() []*latest_v1.TestCase { return c.tests }

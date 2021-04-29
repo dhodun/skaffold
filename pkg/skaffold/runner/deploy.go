@@ -25,17 +25,59 @@ import (
 	"github.com/sirupsen/logrus"
 	"k8s.io/client-go/tools/clientcmd/api"
 
-	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/build"
 	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/color"
 	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/config"
+	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/constants"
 	deployutil "github.com/GoogleContainerTools/skaffold/pkg/skaffold/deploy/util"
 	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/event"
+	eventV2 "github.com/GoogleContainerTools/skaffold/pkg/skaffold/event/v2"
+	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/graph"
 	kubernetesclient "github.com/GoogleContainerTools/skaffold/pkg/skaffold/kubernetes/client"
 	kubectx "github.com/GoogleContainerTools/skaffold/pkg/skaffold/kubernetes/context"
 	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/util"
 )
 
-func (r *SkaffoldRunner) Deploy(ctx context.Context, out io.Writer, artifacts []build.Artifact) error {
+// DeployAndLog deploys a list of already built artifacts and optionally show the logs.
+func (r *SkaffoldRunner) DeployAndLog(ctx context.Context, out io.Writer, artifacts []graph.Artifact) error {
+	eventV2.TaskInProgress(constants.Deploy)
+
+	// Update which images are logged.
+	r.addTagsToPodSelector(artifacts)
+
+	logger := r.createLogger(out, artifacts)
+	defer logger.Stop()
+
+	// Logs should be retrieved up to just before the deploy
+	logger.SetSince(time.Now())
+	// First deploy
+	if err := r.Deploy(ctx, out, artifacts); err != nil {
+		eventV2.TaskFailed(constants.Deploy, err)
+		return err
+	}
+
+	forwarderManager := r.createForwarder(out)
+	defer forwarderManager.Stop()
+
+	if err := forwarderManager.Start(ctx, r.runCtx.GetNamespaces()); err != nil {
+		logrus.Warnln("Error starting port forwarding:", err)
+	}
+
+	// Start printing the logs after deploy is finished
+	if err := logger.Start(ctx, r.runCtx.GetNamespaces()); err != nil {
+		eventV2.TaskFailed(constants.Deploy, err)
+		return fmt.Errorf("starting logger: %w", err)
+	}
+
+	if r.runCtx.Tail() || r.runCtx.PortForward() {
+		color.Yellow.Fprintln(out, "Press Ctrl+C to exit")
+		<-ctx.Done()
+	}
+
+	eventV2.TaskSucceeded(constants.Deploy)
+	return nil
+}
+
+func (r *SkaffoldRunner) Deploy(ctx context.Context, out io.Writer, artifacts []graph.Artifact) error {
 	if r.runCtx.RenderOnly() {
 		return r.Render(ctx, out, artifacts, false, r.runCtx.RenderOutput())
 	}
@@ -47,7 +89,7 @@ func (r *SkaffoldRunner) Deploy(ctx context.Context, out io.Writer, artifacts []
 		fmt.Fprintln(out, artifact.Tag)
 	}
 
-	var localImages []build.Artifact
+	var localImages []graph.Artifact
 	for _, a := range artifacts {
 		if isLocal, err := r.isLocalImage(a.ImageName); err != nil {
 			return err
@@ -82,10 +124,12 @@ See https://skaffold.dev/docs/pipeline-stages/taggers/#how-tagging-works`)
 	}
 
 	event.DeployInProgress()
+	eventV2.TaskInProgress(constants.Deploy)
 	namespaces, err := r.deployer.Deploy(ctx, deployOut, artifacts)
 	postDeployFn()
 	if err != nil {
 		event.DeployFailed(err)
+		eventV2.TaskFailed(constants.Deploy, err)
 		return err
 	}
 
@@ -97,12 +141,13 @@ See https://skaffold.dev/docs/pipeline-stages/taggers/#how-tagging-works`)
 		return err
 	}
 	event.DeployComplete()
+	eventV2.TaskSucceeded(constants.Deploy)
 	r.runCtx.UpdateNamespaces(namespaces)
 	sErr := r.performStatusCheck(ctx, statusCheckOut)
 	return sErr
 }
 
-func (r *SkaffoldRunner) loadImagesIntoCluster(ctx context.Context, out io.Writer, artifacts []build.Artifact) error {
+func (r *SkaffoldRunner) loadImagesIntoCluster(ctx context.Context, out io.Writer, artifacts []graph.Artifact) error {
 	currentContext, err := r.getCurrentContext()
 	if err != nil {
 		return err
@@ -160,14 +205,17 @@ func (r *SkaffoldRunner) performStatusCheck(ctx context.Context, out io.Writer) 
 		return nil
 	}
 
+	eventV2.TaskInProgress(constants.StatusCheck)
 	start := time.Now()
 	color.Default.Fprintln(out, "Waiting for deployments to stabilize...")
 
 	s := newStatusCheck(r.runCtx, r.labeller)
 	if err := s.Check(ctx, out); err != nil {
+		eventV2.TaskFailed(constants.StatusCheck, err)
 		return err
 	}
 
 	color.Default.Fprintln(out, "Deployments stabilized in", util.ShowHumanizeTime(time.Since(start)))
+	eventV2.TaskSucceeded(constants.StatusCheck)
 	return nil
 }

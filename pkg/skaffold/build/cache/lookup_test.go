@@ -25,11 +25,11 @@ import (
 
 	"github.com/docker/docker/client"
 
-	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/build"
 	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/config"
 	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/docker"
 	sErrors "github.com/GoogleContainerTools/skaffold/pkg/skaffold/errors"
-	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/schema/latest"
+	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/graph"
+	latest_v1 "github.com/GoogleContainerTools/skaffold/pkg/skaffold/schema/latest/v1"
 	"github.com/GoogleContainerTools/skaffold/proto/v1"
 	"github.com/GoogleContainerTools/skaffold/testutil"
 )
@@ -125,8 +125,8 @@ func TestLookupLocal(t *testing.T) {
 				cfg:                &mockConfig{mode: config.RunModes.Build},
 			}
 
-			t.Override(&newArtifactHasherFunc, func(_ build.ArtifactGraph, _ DependencyLister, _ config.RunMode) artifactHasher { return test.hasher })
-			details := cache.lookupArtifacts(context.Background(), map[string]string{"artifact": "tag"}, []*latest.Artifact{{
+			t.Override(&newArtifactHasherFunc, func(_ graph.ArtifactGraph, _ DependencyLister, _ config.RunMode) artifactHasher { return test.hasher })
+			details := cache.lookupArtifacts(context.Background(), map[string]string{"artifact": "tag"}, []*latest_v1.Artifact{{
 				ImageName: "artifact",
 			}})
 
@@ -213,8 +213,8 @@ func TestLookupRemote(t *testing.T) {
 				client:             fakeLocalDaemon(test.api),
 				cfg:                &mockConfig{mode: config.RunModes.Build},
 			}
-			t.Override(&newArtifactHasherFunc, func(_ build.ArtifactGraph, _ DependencyLister, _ config.RunMode) artifactHasher { return test.hasher })
-			details := cache.lookupArtifacts(context.Background(), map[string]string{"artifact": "tag"}, []*latest.Artifact{{
+			t.Override(&newArtifactHasherFunc, func(_ graph.ArtifactGraph, _ DependencyLister, _ config.RunMode) artifactHasher { return test.hasher })
+			details := cache.lookupArtifacts(context.Background(), map[string]string{"artifact": "tag"}, []*latest_v1.Artifact{{
 				ImageName: "artifact",
 			}})
 
@@ -230,7 +230,7 @@ type mockHasher struct {
 	val string
 }
 
-func (m mockHasher) hash(context.Context, *latest.Artifact) (string, error) {
+func (m mockHasher) hash(context.Context, *latest_v1.Artifact) (string, error) {
 	return m.val, nil
 }
 
@@ -238,7 +238,7 @@ type failingHasher struct {
 	err error
 }
 
-func (f failingHasher) hash(context.Context, *latest.Artifact) (string, error) {
+func (f failingHasher) hash(context.Context, *latest_v1.Artifact) (string, error) {
 	return "", f.err
 }
 

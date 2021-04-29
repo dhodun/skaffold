@@ -20,15 +20,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/schema/latest"
+	latest_v1 "github.com/GoogleContainerTools/skaffold/pkg/skaffold/schema/latest/v1"
 )
-
-// PortForwardOptions are options set by the command line for port forwarding
-// with additional configuration information as well
-type PortForwardOptions struct {
-	Enabled     bool
-	ForwardPods bool
-}
 
 // WaitForDeletions configures the wait for pending deletions.
 type WaitForDeletions struct {
@@ -46,6 +39,7 @@ type SkaffoldOptions struct {
 	GlobalConfig          string
 	EventLogFile          string
 	RenderOutput          string
+	User                  string
 	Apply                 bool
 	Cleanup               bool
 	Notification          bool
@@ -56,7 +50,6 @@ type SkaffoldOptions struct {
 	Force                 bool
 	NoPrune               bool
 	NoPruneChildren       bool
-	StatusCheck           bool
 	AutoBuild             bool
 	AutoSync              bool
 	AutoDeploy            bool
@@ -73,6 +66,9 @@ type SkaffoldOptions struct {
 	// label isn't available.
 	AddSkaffoldLabels bool
 	DetectMinikube    bool
+	// Experimental is the entrypoint to run skaffold v3 before it's fully implemented.
+	Experimental bool
+	StatusCheck  BoolOrUndefined
 
 	PortForward        PortForwardOptions
 	CustomTag          string
@@ -84,6 +80,7 @@ type SkaffoldOptions struct {
 	DigestSource       string
 	WatchPollInterval  int
 	DefaultRepo        StringOrUndefined
+	PushImages         BoolOrUndefined
 	CustomLabels       []string
 	TargetImages       []string
 	Profiles           []string
@@ -92,6 +89,7 @@ type SkaffoldOptions struct {
 	Command            string
 	RPCPort            int
 	RPCHTTPPort        int
+	BuildConcurrency   int
 
 	// TODO(https://github.com/GoogleContainerTools/skaffold/issues/3668):
 	// remove minikubeProfile from here and instead detect it by matching the
@@ -133,7 +131,7 @@ func (opts *SkaffoldOptions) Mode() RunMode {
 	return RunMode(opts.Command)
 }
 
-func (opts *SkaffoldOptions) IsTargetImage(artifact *latest.Artifact) bool {
+func (opts *SkaffoldOptions) IsTargetImage(artifact *latest_v1.Artifact) bool {
 	if len(opts.TargetImages) == 0 {
 		return true
 	}

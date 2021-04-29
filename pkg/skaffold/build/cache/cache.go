@@ -23,14 +23,15 @@ import (
 	"path/filepath"
 	"sync"
 
-	homedir "github.com/mitchellh/go-homedir"
+	"github.com/mitchellh/go-homedir"
 	"github.com/sirupsen/logrus"
 
 	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/build"
 	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/config"
 	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/constants"
 	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/docker"
-	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/schema/latest"
+	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/graph"
+	latest_v1 "github.com/GoogleContainerTools/skaffold/pkg/skaffold/schema/latest/v1"
 	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/util"
 	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/yaml"
 )
@@ -47,7 +48,7 @@ type ArtifactCache map[string]ImageDetails
 // cache holds any data necessary for accessing the cache
 type cache struct {
 	artifactCache      ArtifactCache
-	artifactGraph      build.ArtifactGraph
+	artifactGraph      graph.ArtifactGraph
 	artifactStore      build.ArtifactStore
 	cacheMutex         sync.RWMutex
 	client             docker.LocalDaemon
@@ -59,13 +60,13 @@ type cache struct {
 }
 
 // DependencyLister fetches a list of dependencies for an artifact
-type DependencyLister func(ctx context.Context, artifact *latest.Artifact) ([]string, error)
+type DependencyLister func(ctx context.Context, artifact *latest_v1.Artifact) ([]string, error)
 
 type Config interface {
 	docker.Config
-	PipelineForImage(imageName string) (latest.Pipeline, bool)
-	GetPipelines() []latest.Pipeline
-	DefaultPipeline() latest.Pipeline
+	PipelineForImage(imageName string) (latest_v1.Pipeline, bool)
+	GetPipelines() []latest_v1.Pipeline
+	DefaultPipeline() latest_v1.Pipeline
 	GetCluster() config.Cluster
 	CacheArtifacts() bool
 	CacheFile() string
@@ -73,7 +74,7 @@ type Config interface {
 }
 
 // NewCache returns the current state of the cache
-func NewCache(cfg Config, isLocalImage func(imageName string) (bool, error), dependencies DependencyLister, graph build.ArtifactGraph, store build.ArtifactStore) (Cache, error) {
+func NewCache(cfg Config, isLocalImage func(imageName string) (bool, error), dependencies DependencyLister, graph graph.ArtifactGraph, store build.ArtifactStore) (Cache, error) {
 	if !cfg.CacheArtifacts() {
 		return &noCache{}, nil
 	}

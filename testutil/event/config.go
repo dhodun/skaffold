@@ -18,22 +18,24 @@ package event
 
 import (
 	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/event"
-	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/schema/latest"
+	eventV2 "github.com/GoogleContainerTools/skaffold/pkg/skaffold/event/v2"
+	latest_v1 "github.com/GoogleContainerTools/skaffold/pkg/skaffold/schema/latest/v1"
 )
 
-func InitializeState(pipes []latest.Pipeline) {
+func InitializeState(pipes []latest_v1.Pipeline) {
 	cfg := config{
 		pipes: pipes,
 	}
 	event.InitializeState(cfg)
+	eventV2.InitializeState(cfg)
 }
 
 type config struct {
-	pipes []latest.Pipeline
+	pipes []latest_v1.Pipeline
 }
 
-func (c config) AutoBuild() bool                 { return true }
-func (c config) AutoDeploy() bool                { return true }
-func (c config) AutoSync() bool                  { return true }
-func (c config) GetPipelines() []latest.Pipeline { return c.pipes }
-func (c config) GetKubeContext() string          { return "temp" }
+func (c config) AutoBuild() bool                    { return true }
+func (c config) AutoDeploy() bool                   { return true }
+func (c config) AutoSync() bool                     { return true }
+func (c config) GetPipelines() []latest_v1.Pipeline { return c.pipes }
+func (c config) GetKubeContext() string             { return "temp" }

@@ -35,7 +35,6 @@ import (
 	shell "github.com/kballard/go-shellquote"
 	"github.com/sirupsen/logrus"
 
-	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/build"
 	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/color"
 	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/config"
 	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/constants"
@@ -43,8 +42,9 @@ import (
 	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/deploy/kubectl"
 	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/deploy/label"
 	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/deploy/types"
+	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/graph"
 	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/kubernetes/manifest"
-	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/schema/latest"
+	latest_v1 "github.com/GoogleContainerTools/skaffold/pkg/skaffold/schema/latest/v1"
 	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/util"
 	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/walk"
 	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/warnings"
@@ -71,7 +71,7 @@ var (
 
 // Deployer deploys workflows using the helm CLI
 type Deployer struct {
-	*latest.HelmDeploy
+	*latest_v1.HelmDeploy
 
 	kubeContext string
 	kubeConfig  string
@@ -83,15 +83,20 @@ type Deployer struct {
 
 	labels map[string]string
 
-	forceDeploy bool
-	enableDebug bool
-
+	forceDeploy   bool
+	enableDebug   bool
+	isMultiConfig bool
 	// bV is the helm binary version
 	bV semver.Version
 }
 
+type Config interface {
+	kubectl.Config
+	IsMultiConfig() bool
+}
+
 // NewDeployer returns a configured Deployer.  Returns an error if current version of helm is less than 3.0.0.
-func NewDeployer(cfg kubectl.Config, labels map[string]string, h *latest.HelmDeploy) (*Deployer, error) {
+func NewDeployer(cfg Config, labels map[string]string, h *latest_v1.HelmDeploy) (*Deployer, error) {
 	hv, err := binVer()
 	if err != nil {
 		return nil, versionGetErr(err)
@@ -102,20 +107,21 @@ func NewDeployer(cfg kubectl.Config, labels map[string]string, h *latest.HelmDep
 	}
 
 	return &Deployer{
-		HelmDeploy:  h,
-		kubeContext: cfg.GetKubeContext(),
-		kubeConfig:  cfg.GetKubeConfig(),
-		namespace:   cfg.GetKubeNamespace(),
-		forceDeploy: cfg.ForceDeploy(),
-		configFile:  cfg.ConfigurationFile(),
-		labels:      labels,
-		bV:          hv,
-		enableDebug: cfg.Mode() == config.RunModes.Debug,
+		HelmDeploy:    h,
+		kubeContext:   cfg.GetKubeContext(),
+		kubeConfig:    cfg.GetKubeConfig(),
+		namespace:     cfg.GetKubeNamespace(),
+		forceDeploy:   cfg.ForceDeploy(),
+		configFile:    cfg.ConfigurationFile(),
+		labels:        labels,
+		bV:            hv,
+		enableDebug:   cfg.Mode() == config.RunModes.Debug,
+		isMultiConfig: cfg.IsMultiConfig(),
 	}, nil
 }
 
 // Deploy deploys the build results to the Kubernetes cluster
-func (h *Deployer) Deploy(ctx context.Context, out io.Writer, builds []build.Artifact) ([]string, error) {
+func (h *Deployer) Deploy(ctx context.Context, out io.Writer, builds []graph.Artifact) ([]string, error) {
 	logrus.Infof("Deploying with helm v%s ...", h.bV)
 
 	var dRes []types.Artifact
@@ -145,12 +151,9 @@ func (h *Deployer) Deploy(ctx context.Context, out io.Writer, builds []build.Art
 
 	// Let's make sure that every image tag is set with `--set`.
 	// Otherwise, templates have no way to use the images that were built.
-	for _, b := range builds {
-		if !valuesSet[b.Tag] {
-			warnings.Printf("image [%s] is not used.", b.Tag)
-			warnings.Printf("image [%s] is used instead.", b.ImageName)
-			warnings.Printf("See helm sample for how to replace image names with their actual tags: https://github.com/GoogleContainerTools/skaffold/blob/master/examples/helm-deployment/skaffold.yaml")
-		}
+	// Skip warning for multi-config projects as there can be artifacts without any usage in the current deployer.
+	if !h.isMultiConfig {
+		warnAboutUnusedImages(builds, valuesSet)
 	}
 
 	if err := label.Apply(ctx, h.labels, dRes); err != nil {
@@ -249,7 +252,7 @@ func (h *Deployer) Cleanup(ctx context.Context, out io.Writer) error {
 }
 
 // Render generates the Kubernetes manifests and writes them out
-func (h *Deployer) Render(ctx context.Context, out io.Writer, builds []build.Artifact, offline bool, filepath string) error {
+func (h *Deployer) Render(ctx context.Context, out io.Writer, builds []graph.Artifact, offline bool, filepath string) error {
 	renderedManifests := new(bytes.Buffer)
 
 	for _, r := range h.Releases {
@@ -288,6 +291,11 @@ func (h *Deployer) Render(ctx context.Context, out io.Writer, builds []build.Art
 			args = append(args, "--namespace", namespace)
 		}
 
+		if r.Repo != "" {
+			args = append(args, "--repo")
+			args = append(args, r.Repo)
+		}
+
 		outBuffer := new(bytes.Buffer)
 		if err := h.exec(ctx, outBuffer, false, nil, args...); err != nil {
 			return userErr("std out err", fmt.Errorf(outBuffer.String()))
@@ -299,7 +307,7 @@ func (h *Deployer) Render(ctx context.Context, out io.Writer, builds []build.Art
 }
 
 // deployRelease deploys a single release
-func (h *Deployer) deployRelease(ctx context.Context, out io.Writer, releaseName string, r latest.HelmRelease, builds []build.Artifact, valuesSet map[string]bool, helmVersion semver.Version) ([]types.Artifact, error) {
+func (h *Deployer) deployRelease(ctx context.Context, out io.Writer, releaseName string, r latest_v1.HelmRelease, builds []graph.Artifact, valuesSet map[string]bool, helmVersion semver.Version) ([]types.Artifact, error) {
 	var err error
 	opts := installOpts{
 		releaseName: releaseName,
@@ -405,7 +413,7 @@ func (h *Deployer) deployRelease(ctx context.Context, out io.Writer, releaseName
 		return nil, userErr("install", err)
 	}
 
-	b, err := h.getRelease(ctx, releaseName, opts.namespace)
+	b, err := h.getReleaseManifest(ctx, releaseName, opts.namespace)
 	if err != nil {
 		return nil, userErr("get release", err)
 	}
@@ -414,8 +422,8 @@ func (h *Deployer) deployRelease(ctx context.Context, out io.Writer, releaseName
 	return artifacts, nil
 }
 
-// getRelease confirms that a release is visible to helm
-func (h *Deployer) getRelease(ctx context.Context, releaseName string, namespace string) (bytes.Buffer, error) {
+// getReleaseManifest confirms that a release is visible to helm and returns the release manifest
+func (h *Deployer) getReleaseManifest(ctx context.Context, releaseName string, namespace string) (bytes.Buffer, error) {
 	// Retry, because sometimes a release may not be immediately visible
 	opts := backoff.NewExponentialBackOff()
 	opts.MaxElapsedTime = 4 * time.Second
@@ -423,7 +431,10 @@ func (h *Deployer) getRelease(ctx context.Context, releaseName string, namespace
 
 	err := backoff.Retry(
 		func() error {
-			if err := h.exec(ctx, &b, false, nil, getArgs(releaseName, namespace)...); err != nil {
+			// only intereted in the deployed YAML
+			args := getArgs(releaseName, namespace)
+			args = append(args, "--template", "{{.Release.Manifest}}")
+			if err := h.exec(ctx, &b, false, nil, args...); err != nil {
 				logrus.Debugf("unable to get release: %v (may retry):\n%s", err, b.String())
 				return err
 			}
@@ -436,7 +447,7 @@ func (h *Deployer) getRelease(ctx context.Context, releaseName string, namespace
 }
 
 // packageChart packages the chart and returns the path to the resulting chart archive
-func (h *Deployer) packageChart(ctx context.Context, r latest.HelmRelease) (string, error) {
+func (h *Deployer) packageChart(ctx context.Context, r latest_v1.HelmRelease) (string, error) {
 	// Allow a test to sneak a predictable path in
 	tmpDir := h.pkgTmpDir
 
@@ -482,9 +493,18 @@ func (h *Deployer) packageChart(ctx context.Context, r latest.HelmRelease) (stri
 	return output[idx:], nil
 }
 
-func chartSource(r latest.HelmRelease) string {
+func chartSource(r latest_v1.HelmRelease) string {
 	if r.RemoteChart != "" {
 		return r.RemoteChart
 	}
 	return r.ChartPath
+}
+
+func warnAboutUnusedImages(builds []graph.Artifact, valuesSet map[string]bool) {
+	for _, b := range builds {
+		if !valuesSet[b.Tag] {
+			warnings.Printf("image [%s] is not used.", b.Tag)
+			warnings.Printf("See helm documentation on how to replace image names with their actual tags: https://skaffold.dev/docs/pipeline-stages/deployers/helm/#image-configuration")
+		}
+	}
 }

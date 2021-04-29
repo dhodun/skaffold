@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strconv"
 	"sync"
 
 	//nolint:golint,staticcheck
@@ -28,6 +29,7 @@ import (
 	"github.com/golang/protobuf/ptypes"
 	"github.com/golang/protobuf/ptypes/timestamp"
 
+	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/constants"
 	sErrors "github.com/GoogleContainerTools/skaffold/pkg/skaffold/errors"
 	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/event"
 	proto "github.com/GoogleContainerTools/skaffold/proto/v2"
@@ -66,7 +68,9 @@ func newHandler() *eventHandler {
 type eventHandler struct {
 	eventLog []proto.Event
 	logLock  sync.Mutex
+	cfg      event.Config
 
+	iteration int
 	state     proto.State
 	stateLock sync.Mutex
 	eventChan chan *proto.Event
@@ -77,6 +81,10 @@ type listener struct {
 	callback func(*proto.Event) error
 	errors   chan error
 	closed   bool
+}
+
+func GetIteration() int {
+	return handler.iteration
 }
 
 func GetState() (*proto.State, error) {
@@ -241,45 +249,83 @@ func emptyStatusCheckState() *proto.StatusCheckState {
 	}
 }
 
-func AutoTriggerDiff(phase sErrors.Phase, val bool) (bool, error) {
+// InitializeState instantiates the global state of the skaffold runner, as well as the event log.
+func InitializeState(cfg event.Config) {
+	handler.cfg = cfg
+	handler.setState(emptyState(cfg))
+}
+
+func AutoTriggerDiff(phase constants.Phase, val bool) (bool, error) {
 	switch phase {
-	case sErrors.Build:
+	case constants.Build:
 		return val != handler.getState().BuildState.AutoTrigger, nil
-	case sErrors.Sync:
+	case constants.Sync:
 		return val != handler.getState().FileSyncState.AutoTrigger, nil
-	case sErrors.Deploy:
+	case constants.Deploy:
 		return val != handler.getState().DeployState.AutoTrigger, nil
 	default:
 		return false, fmt.Errorf("unknown phase %v not found in handler state", phase)
 	}
 }
 
-func TaskInProgress(task sErrors.Phase, iteration int) {
+func TaskInProgress(task constants.Phase) {
+	if task == constants.DevLoop {
+		handler.iteration++
+	}
+
 	handler.handleTaskEvent(&proto.TaskEvent{
-		Id:        fmt.Sprintf("%s-%d", task, iteration),
+		Id:        fmt.Sprintf("%s-%d", task, handler.iteration),
 		Task:      string(task),
-		Iteration: int32(iteration),
+		Iteration: int32(handler.iteration),
 		Status:    InProgress,
 	})
 }
 
-func TaskFailed(task sErrors.Phase, iteration int, err error) {
-	ae := sErrors.ActionableErrV2(task, err)
+func TaskFailed(task constants.Phase, err error) {
+	ae := sErrors.ActionableErrV2(handler.cfg, task, err)
 	handler.handleTaskEvent(&proto.TaskEvent{
-		Id:            fmt.Sprintf("%s-%d", task, iteration),
+		Id:            fmt.Sprintf("%s-%d", task, handler.iteration),
 		Task:          string(task),
-		Iteration:     int32(iteration),
+		Iteration:     int32(handler.iteration),
 		Status:        Failed,
 		ActionableErr: ae,
 	})
 }
 
-func TaskSucceeded(task sErrors.Phase, iteration int) {
+func TaskSucceeded(task constants.Phase) {
 	handler.handleTaskEvent(&proto.TaskEvent{
-		Id:        fmt.Sprintf("%s-%d", task, iteration),
+		Id:        fmt.Sprintf("%s-%d", task, handler.iteration),
 		Task:      string(task),
-		Iteration: int32(iteration),
+		Iteration: int32(handler.iteration),
 		Status:    Succeeded,
+	})
+}
+
+func BuildInProgress(id int, artifact string) {
+	handler.handleBuildSubtaskEvent(&proto.BuildSubtaskEvent{
+		Id:       strconv.Itoa(id),
+		TaskId:   fmt.Sprintf("%s-%d", constants.Build, handler.iteration),
+		Artifact: artifact,
+		Status:   InProgress,
+	})
+}
+
+func BuildFailed(id int, artifact string, err error) {
+	handler.handleBuildSubtaskEvent(&proto.BuildSubtaskEvent{
+		Id:            strconv.Itoa(id),
+		TaskId:        fmt.Sprintf("%s-%d", constants.Build, handler.iteration),
+		Artifact:      artifact,
+		Status:        Failed,
+		ActionableErr: sErrors.ActionableErrV2(handler.cfg, constants.Build, err),
+	})
+}
+
+func BuildSucceeded(id int, artifact string) {
+	handler.handleBuildSubtaskEvent(&proto.BuildSubtaskEvent{
+		Id:       strconv.Itoa(id),
+		TaskId:   fmt.Sprintf("%s-%d", constants.Build, handler.iteration),
+		Artifact: artifact,
+		Status:   Succeeded,
 	})
 }
 
@@ -305,6 +351,14 @@ func (ev *eventHandler) handleTaskEvent(e *proto.TaskEvent) {
 	ev.handle(&proto.Event{
 		EventType: &proto.Event_TaskEvent{
 			TaskEvent: e,
+		},
+	})
+}
+
+func (ev *eventHandler) handleBuildSubtaskEvent(e *proto.BuildSubtaskEvent) {
+	ev.handle(&proto.Event{
+		EventType: &proto.Event_BuildSubtaskEvent{
+			BuildSubtaskEvent: e,
 		},
 	})
 }

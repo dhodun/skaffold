@@ -28,23 +28,23 @@ import (
 	"github.com/segmentio/textio"
 	"github.com/sirupsen/logrus"
 
-	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/build"
 	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/color"
 	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/config"
 	deployerr "github.com/GoogleContainerTools/skaffold/pkg/skaffold/deploy/error"
 	deployutil "github.com/GoogleContainerTools/skaffold/pkg/skaffold/deploy/util"
 	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/event"
+	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/graph"
 	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/kubernetes"
 	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/kubernetes/manifest"
-	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/schema/latest"
+	latest_v1 "github.com/GoogleContainerTools/skaffold/pkg/skaffold/schema/latest/v1"
 	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/util"
 )
 
 // Deployer deploys workflows using kubectl CLI.
 type Deployer struct {
-	*latest.KubectlDeploy
+	*latest_v1.KubectlDeploy
 
-	originalImages     []build.Artifact
+	originalImages     []graph.Artifact
 	hydratedManifests  []string
 	workingDir         string
 	globalConfig       string
@@ -58,7 +58,7 @@ type Deployer struct {
 
 // NewDeployer returns a new Deployer for a DeployConfig filled
 // with the needed configuration for `kubectl apply`
-func NewDeployer(cfg Config, labels map[string]string, d *latest.KubectlDeploy) (*Deployer, error) {
+func NewDeployer(cfg Config, labels map[string]string, d *latest_v1.KubectlDeploy) (*Deployer, error) {
 	defaultNamespace := ""
 	if d.DefaultNamespace != nil {
 		var err error
@@ -83,7 +83,7 @@ func NewDeployer(cfg Config, labels map[string]string, d *latest.KubectlDeploy) 
 
 // Deploy templates the provided manifests with a simple `find and replace` and
 // runs `kubectl apply` on those manifests
-func (k *Deployer) Deploy(ctx context.Context, out io.Writer, builds []build.Artifact) ([]string, error) {
+func (k *Deployer) Deploy(ctx context.Context, out io.Writer, builds []graph.Artifact) ([]string, error) {
 	var (
 		manifests manifest.ManifestList
 		err       error
@@ -242,7 +242,7 @@ func (k *Deployer) readRemoteManifest(ctx context.Context, name string) ([]byte,
 	return manifest.Bytes(), nil
 }
 
-func (k *Deployer) Render(ctx context.Context, out io.Writer, builds []build.Artifact, offline bool, filepath string) error {
+func (k *Deployer) Render(ctx context.Context, out io.Writer, builds []graph.Artifact, offline bool, filepath string) error {
 	manifests, err := k.renderManifests(ctx, out, builds, offline)
 	if err != nil {
 		return err
@@ -251,7 +251,7 @@ func (k *Deployer) Render(ctx context.Context, out io.Writer, builds []build.Art
 	return manifest.Write(manifests.String(), filepath, out)
 }
 
-func (k *Deployer) renderManifests(ctx context.Context, out io.Writer, builds []build.Artifact, offline bool) (manifest.ManifestList, error) {
+func (k *Deployer) renderManifests(ctx context.Context, out io.Writer, builds []graph.Artifact, offline bool) (manifest.ManifestList, error) {
 	if err := k.kubectl.CheckVersion(ctx); err != nil {
 		color.Default.Fprintln(out, "kubectl client version:", k.kubectl.Version(ctx))
 		color.Default.Fprintln(out, err)
@@ -293,7 +293,7 @@ func (k *Deployer) renderManifests(ctx context.Context, out io.Writer, builds []
 			if err != nil {
 				return nil, err
 			}
-			builds = append(builds, build.Artifact{
+			builds = append(builds, graph.Artifact{
 				ImageName: artifact.ImageName,
 				Tag:       tag,
 			})

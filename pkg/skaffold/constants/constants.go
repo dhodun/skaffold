@@ -19,10 +19,22 @@ package constants
 import (
 	"github.com/sirupsen/logrus"
 
-	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/schema/latest"
+	latest_v1 "github.com/GoogleContainerTools/skaffold/pkg/skaffold/schema/latest/v1"
 )
 
 const (
+	// These are phases in Skaffold
+	DevLoop     = Phase("DevLoop")
+	Init        = Phase("Init")
+	Build       = Phase("Build")
+	Test        = Phase("Test")
+	Deploy      = Phase("Deploy")
+	StatusCheck = Phase("StatusCheck")
+	PortForward = Phase("PortForward")
+	Sync        = Phase("Sync")
+	DevInit     = Phase("DevInit")
+	Cleanup     = Phase("Cleanup")
+
 	// DefaultLogLevel is the default global verbosity
 	DefaultLogLevel = logrus.WarnLevel
 
@@ -60,9 +72,11 @@ const (
 	GithubIssueLink = "https://github.com/GoogleContainerTools/skaffold/issues/new"
 )
 
+type Phase string
+
 var (
-	Pod     latest.ResourceType = "pod"
-	Service latest.ResourceType = "service"
+	Pod     latest_v1.ResourceType = "pod"
+	Service latest_v1.ResourceType = "service"
 
 	DefaultLocalConcurrency = 1
 )

@@ -27,14 +27,15 @@ import (
 
 	"k8s.io/client-go/tools/clientcmd/api"
 
-	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/build"
 	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/config"
 	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/deploy/label"
 	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/deploy/status"
+	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/graph"
 	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/kubectl"
 	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/kubernetes/client"
 	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/runner/runcontext"
-	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/schema/latest"
+	latest_v1 "github.com/GoogleContainerTools/skaffold/pkg/skaffold/schema/latest/v1"
+	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/util"
 	"github.com/GoogleContainerTools/skaffold/testutil"
 )
 
@@ -43,25 +44,32 @@ func TestDeploy(t *testing.T) {
 	tests := []struct {
 		description string
 		testBench   *TestBench
-		statusCheck bool
+		statusCheck config.BoolOrUndefined
 		shouldErr   bool
 		shouldWait  bool
 	}{
 		{
 			description: "deploy shd perform status check",
 			testBench:   &TestBench{},
-			statusCheck: true,
+			statusCheck: config.NewBoolOrUndefined(nil),
+			shouldWait:  true,
+		},
+		{
+			description: "deploy shd perform status check",
+			testBench:   &TestBench{},
+			statusCheck: config.NewBoolOrUndefined(util.BoolPtr(true)),
 			shouldWait:  true,
 		},
 		{
 			description: "deploy shd not perform status check",
 			testBench:   &TestBench{},
+			statusCheck: config.NewBoolOrUndefined(util.BoolPtr(false)),
 		},
 		{
 			description: "deploy shd not perform status check when deployer is in error",
 			testBench:   &TestBench{deployErrors: []error{errors.New("deploy error")}},
 			shouldErr:   true,
-			statusCheck: true,
+			statusCheck: config.NewBoolOrUndefined(util.BoolPtr(true)),
 		},
 	}
 
@@ -73,11 +81,11 @@ func TestDeploy(t *testing.T) {
 				return dummyStatusChecker{}
 			})
 
-			runner := createRunner(t, test.testBench, nil, []*latest.Artifact{{ImageName: "img1"}, {ImageName: "img2"}}, nil)
+			runner := createRunner(t, test.testBench, nil, []*latest_v1.Artifact{{ImageName: "img1"}, {ImageName: "img2"}}, nil)
 			runner.runCtx.Opts.StatusCheck = test.statusCheck
 			out := new(bytes.Buffer)
 
-			err := runner.Deploy(context.Background(), out, []build.Artifact{
+			err := runner.Deploy(context.Background(), out, []graph.Artifact{
 				{ImageName: "img1", Tag: "img1:tag1"},
 				{ImageName: "img2", Tag: "img2:tag2"},
 			})
@@ -123,10 +131,10 @@ func TestDeployNamespace(t *testing.T) {
 				return dummyStatusChecker{}
 			})
 
-			runner := createRunner(t, test.testBench, nil, []*latest.Artifact{{ImageName: "img1"}, {ImageName: "img2"}}, nil)
+			runner := createRunner(t, test.testBench, nil, []*latest_v1.Artifact{{ImageName: "img1"}, {ImageName: "img2"}}, nil)
 			runner.runCtx.Namespaces = test.Namespaces
 
-			runner.Deploy(context.Background(), ioutil.Discard, []build.Artifact{
+			runner.Deploy(context.Background(), ioutil.Discard, []graph.Artifact{
 				{ImageName: "img1", Tag: "img1:tag1"},
 				{ImageName: "img2", Tag: "img2:tag2"},
 			})
@@ -153,7 +161,7 @@ func TestSkaffoldDeployRenderOnly(t *testing.T) {
 			kubectlCLI: kubectl.NewCLI(runCtx, ""),
 			deployer:   deployer,
 		}
-		var builds []build.Artifact
+		var builds []graph.Artifact
 
 		err = r.Deploy(context.Background(), ioutil.Discard, builds)
 
