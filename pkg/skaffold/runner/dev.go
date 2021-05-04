@@ -32,7 +32,7 @@ import (
 	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/filemon"
 	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/graph"
 	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/instrumentation"
-	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/kubernetes"
+	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/kubernetes/logger"
 	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/kubernetes/portforward"
 	latest_v1 "github.com/GoogleContainerTools/skaffold/pkg/skaffold/schema/latest/v1"
 	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/sync"
@@ -50,7 +50,7 @@ var (
 	fileSyncSucceeded  = event.FileSyncSucceeded
 )
 
-func (r *SkaffoldRunner) doDev(ctx context.Context, out io.Writer, logger *kubernetes.LogAggregator, forwarderManager portforward.Forwarder) error {
+func (r *SkaffoldRunner) doDev(ctx context.Context, out io.Writer, logger *logger.LogAggregator, forwarderManager portforward.Forwarder) error {
 	// never queue intents from user, even if they're not used
 	defer r.intents.reset()
 
@@ -201,7 +201,7 @@ func (r *SkaffoldRunner) Dev(ctx context.Context, out io.Writer, artifacts []*la
 		default:
 			if err := r.monitor.Register(
 				func() ([]string, error) {
-					return r.sourceDependencies.ResolveForArtifact(ctx, artifact)
+					return r.sourceDependencies.TransitiveArtifactDependencies(ctx, artifact)
 				},
 				func(e filemon.Events) {
 					s, err := sync.NewItem(ctx, artifact, e, r.builds, r.runCtx, len(g[artifact.ImageName]))
